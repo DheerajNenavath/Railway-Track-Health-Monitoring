@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RTHM — Track Health Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #070a0e;
+    --panel:     #0d1117;
+    --border:    #1e2a38;
+    --dim:       #3a4a5a;
+    --text:      #c8d8e8;
+    --muted:     #4a6070;
+    --mono:      'Share Tech Mono', monospace;
+    --head:      'Barlow Condensed', sans-serif;
+
+    --healthy:   #00e87a;
+    --monitor:   #f5c542;
+    --maint:     #ff7b1c;
+    --critical:  #ff2244;
+    --thr1: 14.07;
+    --thr2: 18.48;
+    --thr3: 24.32;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── scanline overlay ── */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,.08) 2px,
+      rgba(0,0,0,.08) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  /* ── CONFIG OVERLAY ── */
+  #cfg-overlay {
+    position: fixed; inset: 0;
+    background: rgba(7,10,14,.97);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 500;
+    flex-direction: column;
+    gap: 24px;
+    padding: 32px;
+  }
+  #cfg-overlay h2 {
+    font-family: var(--head);
+    font-weight: 800;
+    font-size: 2rem;
+    letter-spacing: .15em;
+    color: var(--text);
+  }
+  .cfg-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 32px;
+    max-width: 480px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .cfg-row { display: flex; flex-direction: column; gap: 6px; }
+  .cfg-row label {
+    font-family: var(--mono);
+    font-size: .75rem;
+    letter-spacing: .12em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  .cfg-row input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: .95rem;
+    padding: 10px 14px;
+    outline: none;
+    width: 100%;
+    transition: border-color .2s;
+  }
+  .cfg-row input:focus { border-color: var(--healthy); }
+  .cfg-note {
+    font-size: .72rem;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  #cfg-start {
+    background: var(--healthy);
+    color: var(--bg);
+    border: none;
+    padding: 12px 28px;
+    font-family: var(--head);
+    font-weight: 800;
+    font-size: 1rem;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    cursor: pointer;
+    width: 100%;
+    transition: opacity .2s;
+  }
+  #cfg-start:hover { opacity: .85; }
+
+  /* ── HEADER ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 28px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .logo {
+    font-family: var(--head);
+    font-weight: 800;
+    font-size: 1.35rem;
+    letter-spacing: .25em;
+    color: var(--text);
+  }
+  .logo span { color: var(--healthy); }
+  .header-meta {
+    font-size: .72rem;
+    letter-spacing: .08em;
+    color: var(--muted);
+    text-align: right;
+    line-height: 1.7;
+  }
+  .dot-live {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--healthy);
+    margin-right: 6px;
+    animation: blink 2s ease-in-out infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
+
+  /* ── MAIN GRID ── */
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    padding: 24px 28px;
+    gap: 20px;
+    max-width: 900px;
+    width: 100%;
+    margin: 0 auto;
+  }
+
+  /* ── STATE BANNER ── */
+  #state-banner {
+    border: 2px solid var(--border);
+    padding: 28px 36px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color .4s, background .4s;
+  }
+  #state-banner::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 5px;
+    background: var(--state-color, var(--healthy));
+    transition: background .4s;
+  }
+  .state-label-group { flex: 1; }
+  .state-sup {
+    font-size: .7rem;
+    letter-spacing: .18em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  #state-text {
+    font-family: var(--head);
+    font-weight: 800;
+    font-size: clamp(2.2rem, 6vw, 3.8rem);
+    letter-spacing: .06em;
+    color: var(--state-color, var(--healthy));
+    line-height: 1;
+    transition: color .4s;
+  }
+  #action-text {
+    font-size: .8rem;
+    color: var(--muted);
+    letter-spacing: .06em;
+    margin-top: 10px;
+    font-family: var(--mono);
+  }
+  .d2-readout {
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .d2-readout .label {
+    font-size: .68rem;
+    letter-spacing: .14em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  #d2-big {
+    font-family: var(--head);
+    font-weight: 800;
+    font-size: clamp(2.4rem, 6vw, 4rem);
+    letter-spacing: .04em;
+    color: var(--state-color, var(--healthy));
+    line-height: 1;
+    transition: color .4s;
+  }
+  .d2-readout .unit {
+    font-size: .72rem;
+    color: var(--muted);
+    letter-spacing: .1em;
+    margin-top: 4px;
+  }
+
+  /* ── CRITICAL FLASH ── */
+  @keyframes critFlash {
+    0%,100% { background: transparent; }
+    50%      { background: rgba(255,34,68,.07); }
+  }
+  .is-critical { animation: critFlash 0.8s ease-in-out infinite; }
+
+  /* ── LOWER GRID ── */
+  .lower { display: grid; grid-template-columns: 1fr; gap: 20px; }
+
+  /* ── PANEL ── */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 22px 24px;
+  }
+  .panel-title {
+    font-size: .68rem;
+    letter-spacing: .18em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .panel-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── D² GAUGE ── */
+  .gauge-wrap { position: relative; }
+  .gauge-track {
+    height: 28px;
+    background: #111820;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+    position: relative;
+  }
+  #gauge-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--healthy);
+    transition: width .6s cubic-bezier(.4,0,.2,1), background .4s;
+    border-radius: 2px 0 0 2px;
+  }
+  /* threshold tick marks */
+  .thr-marks {
+    position: relative;
+    height: 22px;
+    margin-top: 4px;
+  }
+  .thr-tick {
+    position: absolute;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+  .thr-tick .line {
+    width: 1px;
+    height: 8px;
+    background: var(--dim);
+  }
+  .thr-tick .val {
+    font-size: .62rem;
+    color: var(--dim);
+    letter-spacing: .05em;
+    white-space: nowrap;
+  }
+  /* threshold vertical lines inside gauge */
+  .thr-bar {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 1px;
+    background: var(--dim);
+    pointer-events: none;
+  }
+
+  /* zone labels */
+  .zone-labels {
+    display: flex;
+    margin-top: 16px;
+    gap: 4px;
+  }
+  .zone-seg {
+    flex: 1;
+    text-align: center;
+    font-size: .62rem;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    padding: 4px 0;
+    border-top: 2px solid;
+  }
+  .z-h { color: var(--healthy); border-color: var(--healthy); }
+  .z-m { color: var(--monitor); border-color: var(--monitor); }
+  .z-mn { color: var(--maint);   border-color: var(--maint);   }
+  .z-c  { color: var(--critical);border-color: var(--critical); }
+
+  /* ── META ROW ── */
+  .meta-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 12px;
+  }
+  .meta-cell {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 12px 14px;
+  }
+  .meta-cell .lbl {
+    font-size: .62rem;
+    letter-spacing: .14em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 5px;
+  }
+  .meta-cell .val {
+    font-size: 1.05rem;
+    letter-spacing: .04em;
+    color: var(--text);
+  }
+
+  /* ── STATUS FOOTER ── */
+  footer {
+    padding: 10px 28px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: .68rem;
+    color: var(--muted);
+    letter-spacing: .08em;
+    flex-shrink: 0;
+  }
+  #status-msg { display: flex; align-items: center; gap: 8px; }
+  #status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background .3s;
+  }
+  #next-bar {
+    height: 2px;
+    background: var(--border);
+    width: 120px;
+    border-radius: 1px;
+    overflow: hidden;
+  }
+  #next-fill {
+    height: 100%;
+    background: var(--healthy);
+    width: 100%;
+    transform-origin: left;
+    transition: none;
+  }
+
+  /* ── Sound toggle ── */
+  #sound-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: .68rem;
+    letter-spacing: .1em;
+    padding: 4px 10px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: border-color .2s, color .2s;
+  }
+  #sound-btn:hover { border-color: var(--text); color: var(--text); }
+  #sound-btn.active { border-color: var(--healthy); color: var(--healthy); }
+
+  #cfg-edit {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: .68rem;
+    letter-spacing: .1em;
+    padding: 4px 10px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: border-color .2s, color .2s;
+  }
+  #cfg-edit:hover { border-color: var(--text); color: var(--text); }
+
+  @media (max-width: 540px) {
+    main { padding: 14px 14px; gap: 14px; }
+    header { padding: 12px 14px; }
+    footer { padding: 8px 14px; flex-wrap: wrap; gap: 8px; }
+    #state-banner { flex-direction: column; align-items: flex-start; }
+    .d2-readout { text-align: left; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── CONFIG OVERLAY ──────────────────────────────────── -->
+<div id="cfg-overlay">
+  <h2>RTHM · CONFIGURE</h2>
+  <div class="cfg-box">
+    <div class="cfg-row">
+      <label>ThingSpeak Channel ID</label>
+      <input id="in-channel" type="text" placeholder="e.g. 2345678" autocomplete="off">
+    </div>
+    <div class="cfg-row">
+      <label>ThingSpeak Read API Key</label>
+      <input id="in-key" type="text" placeholder="e.g. ABCDEF1234567890" autocomplete="off">
+    </div>
+    <p class="cfg-note">
+      Find these at <strong>thingspeak.com → My Channels → your channel → API Keys</strong>.
+      The read key is different from the write key your friend used in the hub code.
+      Leave read key blank if your channel is public.
+    </p>
+    <button id="cfg-start">START MONITORING</button>
+  </div>
+</div>
+
+<!-- ── HEADER ──────────────────────────────────────────── -->
+<header>
+  <div class="logo">RTHM<span>·</span>LIVE</div>
+  <div class="header-meta">
+    <div><span class="dot-live"></span>POLLING EVERY 15s</div>
+    <div id="channel-label" style="color:var(--dim)">—</div>
+  </div>
+</header>
+
+<!-- ── MAIN ────────────────────────────────────────────── -->
+<main>
+
+  <!-- STATE BANNER -->
+  <div id="state-banner">
+    <div class="state-label-group">
+      <div class="state-sup">Track Health Status</div>
+      <div id="state-text">AWAITING DATA</div>
+      <div id="action-text">—</div>
+    </div>
+    <div class="d2-readout">
+      <div class="label">D² Distance</div>
+      <div id="d2-big">—</div>
+      <div class="unit">χ²(7) space</div>
+    </div>
+  </div>
+
+  <div class="lower">
+
+    <!-- D² GAUGE -->
+    <div class="panel">
+      <div class="panel-title">Mahalanobis Distance D²</div>
+      <div class="gauge-wrap">
+        <div class="gauge-track" id="gauge-track">
+          <!-- threshold bars injected by JS -->
+          <div id="gauge-fill"></div>
+        </div>
+        <div class="thr-marks" id="thr-marks"></div>
+        <div class="zone-labels">
+          <div class="zone-seg z-h">Healthy<br>&lt;14.07</div>
+          <div class="zone-seg z-m">Monitor<br>14–18</div>
+          <div class="zone-seg z-mn">Maint.<br>18–24</div>
+          <div class="zone-seg z-c">Critical<br>&gt;24.32</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- META DATA -->
+    <div class="panel">
+      <div class="panel-title">Packet Metadata</div>
+      <div class="meta-row">
+        <div class="meta-cell"><div class="lbl">Sensor Source</div><div class="val" id="m-src">—</div></div>
+        <div class="meta-cell"><div class="lbl">RSSI</div><div class="val" id="m-rssi">—</div></div>
+        <div class="meta-cell"><div class="lbl">SNR</div><div class="val" id="m-snr">—</div></div>
+        <div class="meta-cell"><div class="lbl">Last Update</div><div class="val" id="m-time">—</div></div>
+        <div class="meta-cell"><div class="lbl">Packets Rx</div><div class="val" id="m-pkts">0</div></div>
+        <div class="meta-cell"><div class="lbl">Entry ID</div><div class="val" id="m-entry">—</div></div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- ── FOOTER ───────────────────────────────────────────── -->
+<footer>
+  <div id="status-msg">
+    <div id="status-dot"></div>
+    <span id="status-text">Not started</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:16px">
+    <div style="display:flex;align-items:center;gap:8px;font-size:.65rem;color:var(--muted)">
+      NEXT POLL <div id="next-bar"><div id="next-fill"></div></div>
+    </div>
+    <button id="sound-btn">🔔 SOUND OFF</button>
+    <button id="cfg-edit">⚙ CONFIG</button>
+  </div>
+</footer>
+
+<script>
+// ── Constants ─────────────────────────────────────────────────────────────────
+const THR1 = 14.07, THR2 = 18.48, THR3 = 24.32;
+const GAUGE_MAX = 40;           // D² scale max on gauge
+const POLL_MS   = 15000;        // 15 s ThingSpeak limit
+
+const STATE_META = {
+  0: { label:'HEALTHY',     color:'var(--healthy)', action:'No action required. Track is within normal parameters.' },
+  1: { label:'MONITOR',     color:'var(--monitor)', action:'Inspect track at next scheduled stop.' },
+  2: { label:'MAINTENANCE', color:'var(--maint)',   action:'Schedule maintenance within 72 hours.' },
+  3: { label:'CRITICAL',    color:'var(--critical)',action:'⚠ HALT — Do not run trains on this section.' },
+};
+const SRC_LABELS = ['AVERAGE','NORM_AVG','CONSERVATIVE','A_ONLY','B_ONLY','BOTH_FAILED'];
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let channelId = '', readKey = '';
+let soundEnabled = false;
+let audioCtx = null;
+let pktCount  = 0;
+let lastEntryId = null;
+let pollTimer   = null;
+let countdownTimer = null;
+let countdown = POLL_MS / 1000;
+
+// ── DOM refs ─────────────────────────────────────────────────────────────────
+const cfgOverlay   = document.getElementById('cfg-overlay');
+const inChannel    = document.getElementById('in-channel');
+const inKey        = document.getElementById('in-key');
+const cfgStart     = document.getElementById('cfg-start');
+const cfgEdit      = document.getElementById('cfg-edit');
+const channelLabel = document.getElementById('channel-label');
+const stateBanner  = document.getElementById('state-banner');
+const stateText    = document.getElementById('state-text');
+const actionText   = document.getElementById('action-text');
+const d2Big        = document.getElementById('d2-big');
+const gaugeFill    = document.getElementById('gauge-fill');
+const gaugeTrack   = document.getElementById('gauge-track');
+const thrMarks     = document.getElementById('thr-marks');
+const statusDot    = document.getElementById('status-dot');
+const statusText   = document.getElementById('status-text');
+const nextFill     = document.getElementById('next-fill');
+const soundBtn     = document.getElementById('sound-btn');
+const mSrc         = document.getElementById('m-src');
+const mRssi        = document.getElementById('m-rssi');
+const mSnr         = document.getElementById('m-snr');
+const mTime        = document.getElementById('m-time');
+const mPkts        = document.getElementById('m-pkts');
+const mEntry       = document.getElementById('m-entry');
+
+// ── Build gauge threshold marks ────────────────────────────────────────────
+function buildGaugeTicks() {
+  const thrs = [THR1, THR2, THR3];
+  const labels = ['14.07', '18.48', '24.32'];
+  // Inject tick lines inside gauge track
+  thrs.forEach(v => {
+    const bar = document.createElement('div');
+    bar.className = 'thr-bar';
+    bar.style.left = pct(v) + '%';
+    gaugeTrack.appendChild(bar);
+  });
+  // Tick labels below gauge
+  thrs.forEach((v, i) => {
+    const tick = document.createElement('div');
+    tick.className = 'thr-tick';
+    tick.style.left = pct(v) + '%';
+    tick.innerHTML = `<div class="line"></div><div class="val">${labels[i]}</div>`;
+    thrMarks.appendChild(tick);
+  });
+}
+
+function pct(val) {
+  return Math.min(100, (val / GAUGE_MAX) * 100);
+}
+
+// ── Config ─────────────────────────────────────────────────────────────────
+function loadConfig() {
+  channelId = localStorage.getItem('rthm_channel') || '';
+  readKey   = localStorage.getItem('rthm_key')     || '';
+  if (channelId) inChannel.value = channelId;
+  if (readKey)   inKey.value     = readKey;
+}
+
+function saveConfig() {
+  channelId = inChannel.value.trim();
+  readKey   = inKey.value.trim();
+  localStorage.setItem('rthm_channel', channelId);
+  localStorage.setItem('rthm_key',     readKey);
+}
+
+cfgStart.addEventListener('click', () => {
+  if (!inChannel.value.trim()) {
+    inChannel.style.borderColor = 'var(--critical)';
+    inChannel.placeholder = 'Channel ID is required!';
+    return;
+  }
+  saveConfig();
+  cfgOverlay.style.display = 'none';
+  channelLabel.textContent = 'CH ' + channelId;
+  startPolling();
+});
+
+cfgEdit.addEventListener('click', () => {
+  stopPolling();
+  cfgOverlay.style.display = 'flex';
+});
+
+// ── Sound ──────────────────────────────────────────────────────────────────
+// iOS Safari requires: (1) AudioContext created in a user gesture,
+// (2) context.resume() called in the same gesture,
+// (3) a silent buffer played immediately to fully unlock it.
+function unlockAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  // resume() is required on iOS — context starts 'suspended'
+  audioCtx.resume().then(() => {
+    // Play a silent 0.1s buffer to fully unlock the audio hardware on iOS
+    const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.1, audioCtx.sampleRate);
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(audioCtx.destination);
+    src.start(0);
+    src.onended = () => {
+      soundBtn.textContent = '🔔 SOUND ON';
+      soundBtn.classList.add('active');
+      soundEnabled = true;
+    };
+  }).catch(() => {
+    soundBtn.textContent = '🔔 FAILED';
+  });
+}
+
+soundBtn.addEventListener('click', () => {
+  if (soundEnabled) {
+    // Turn off
+    soundEnabled = false;
+    soundBtn.textContent = '🔔 SOUND OFF';
+    soundBtn.classList.remove('active');
+  } else {
+    // Turn on — must unlock inside this click handler (user gesture)
+    unlockAudio();
+  }
+});
+
+function playAlert() {
+  if (!soundEnabled || !audioCtx) return;
+  // Always resume before scheduling — iOS can re-suspend in background tabs
+  audioCtx.resume().then(() => {
+    const times = [0, 0.35, 0.70];
+    const freqs = [660, 880, 1100];
+    times.forEach((t, i) => {
+      const osc  = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.frequency.value = freqs[i];
+      osc.type = 'square';
+      gain.gain.setValueAtTime(0,    audioCtx.currentTime + t);
+      gain.gain.linearRampToValueAtTime(0.18, audioCtx.currentTime + t + 0.02);
+      gain.gain.linearRampToValueAtTime(0,    audioCtx.currentTime + t + 0.28);
+      osc.start(audioCtx.currentTime + t);
+      osc.stop(audioCtx.currentTime  + t + 0.3);
+    });
+  });
+}
+
+// ── Polling ────────────────────────────────────────────────────────────────
+function startPolling() {
+  fetchData();
+  pollTimer = setInterval(fetchData, POLL_MS);
+  startCountdown();
+}
+
+function stopPolling() {
+  clearInterval(pollTimer);
+  clearInterval(countdownTimer);
+  pollTimer = null;
+}
+
+function startCountdown() {
+  countdown = POLL_MS / 1000;
+  clearInterval(countdownTimer);
+  // Animate the next-poll bar
+  nextFill.style.transition = 'none';
+  nextFill.style.width = '100%';
+  // Trigger reflow, then animate down
+  nextFill.getBoundingClientRect();
+  nextFill.style.transition = `width ${POLL_MS}ms linear`;
+  nextFill.style.width = '0%';
+
+  countdownTimer = setInterval(() => {
+    countdown--;
+    if (countdown <= 0) {
+      clearInterval(countdownTimer);
+      countdown = POLL_MS / 1000;
+    }
+  }, 1000);
+}
+
+async function fetchData() {
+  setStatus('fetching', 'Polling ThingSpeak…');
+  const keyParam = readKey ? `&api_key=${readKey}` : '';
+  const url = `https://api.thingspeak.com/channels/${channelId}/feeds/last.json?${keyParam}`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+
+    // Check for new data
+    const entryId = json.entry_id;
+    if (entryId === lastEntryId) {
+      setStatus('idle', `No new data — entry #${entryId} (unchanged)`);
+      startCountdown();
+      return;
+    }
+    lastEntryId = entryId;
+
+    const state  = parseInt(json.field1 ?? '0');
+    const d2     = parseFloat(json.field2 ?? '0');
+    const source = parseInt(json.field3 ?? '0');
+    const rssi   = parseInt(json.field4 ?? '0');
+    const snr    = parseFloat(json.field5 ?? '0');
+    const ts     = json.created_at;
+
+    pktCount++;
+    updateUI(state, d2, source, rssi, snr, ts, entryId);
+    setStatus('ok', `Entry #${entryId} received — ${new Date(ts).toLocaleTimeString()}`);
+    startCountdown();
+
+  } catch(e) {
+    setStatus('error', `Error: ${e.message}`);
+    startCountdown();
+  }
+}
+
+// ── UI Update ──────────────────────────────────────────────────────────────
+function updateUI(state, d2, source, rssi, snr, ts, entryId) {
+  state = Math.min(state, 3);
+  const meta  = STATE_META[state];
+
+  // Banner
+  stateBanner.style.setProperty('--state-color', meta.color);
+  stateBanner.classList.toggle('is-critical', state === 3);
+  stateText.textContent  = meta.label;
+  stateText.style.color  = meta.color;
+  d2Big.style.color      = meta.color;
+  actionText.textContent = meta.action;
+  stateBanner.style.borderColor = state === 3 ? 'rgba(255,34,68,.5)' : 'var(--border)';
+
+  // D² value
+  d2Big.textContent = isNaN(d2) ? '—' : d2.toFixed(2);
+
+  // Gauge
+  const fillPct = Math.min(100, (d2 / GAUGE_MAX) * 100);
+  gaugeFill.style.width = fillPct + '%';
+  const gaugeColor = state === 0 ? 'var(--healthy)'
+                   : state === 1 ? 'var(--monitor)'
+                   : state === 2 ? 'var(--maint)'
+                   :               'var(--critical)';
+  gaugeFill.style.background = gaugeColor;
+
+  // Metadata
+  mSrc.textContent   = SRC_LABELS[Math.min(source, 5)] ?? '?';
+  mRssi.textContent  = rssi + ' dBm';
+  mSnr.textContent   = snr.toFixed(1) + ' dB';
+  mTime.textContent  = ts ? new Date(ts).toLocaleTimeString() : '—';
+  mPkts.textContent  = pktCount;
+  mEntry.textContent = '#' + entryId;
+
+  // Alert sound on CRITICAL
+  if (state === 3) playAlert();
+}
+
+// ── Status indicator ──────────────────────────────────────────────────────
+function setStatus(type, msg) {
+  statusText.textContent = msg;
+  const colors = { fetching:'var(--monitor)', ok:'var(--healthy)', idle:'var(--muted)', error:'var(--critical)' };
+  statusDot.style.background = colors[type] ?? 'var(--muted)';
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+buildGaugeTicks();
+loadConfig();
+
+// Auto-start if config already saved
+if (channelId) {
+  cfgOverlay.style.display = 'none';
+  channelLabel.textContent = 'CH ' + channelId;
+  startPolling();
+}
+</script>
+</body>
+</html>
