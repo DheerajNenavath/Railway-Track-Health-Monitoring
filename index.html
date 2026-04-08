@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RTHM — Track Health Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;600;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:       #070a0e;
+  --panel:    #0d1117;
+  --border:   #1e2a38;
+  --dim:      #2e3f50;
+  --muted:    #4a6070;
+  --text:     #c8d8e8;
+  --mono:     'Share Tech Mono', monospace;
+  --head:     'Barlow Condensed', sans-serif;
+  --healthy:  #00e87a;
+  --monitor:  #f5c542;
+  --maint:    #ff7b1c;
+  --critical: #ff2244;
+}
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+body { background:var(--bg); color:var(--text); font-family:var(--mono); min-height:100vh; display:flex; flex-direction:column; }
+body::after {
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:999;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.07) 2px,rgba(0,0,0,.07) 4px);
+}
+
+/* CONFIG */
+#cfg-overlay {
+  position:fixed; inset:0; background:rgba(7,10,14,.97);
+  display:flex; align-items:center; justify-content:center;
+  flex-direction:column; gap:20px; padding:24px; z-index:500;
+}
+#cfg-overlay h2 { font-family:var(--head); font-weight:800; font-size:2rem; letter-spacing:.2em; }
+.cfg-box { background:var(--panel); border:1px solid var(--border); padding:28px; max-width:460px; width:100%; display:flex; flex-direction:column; gap:16px; }
+.cfg-row { display:flex; flex-direction:column; gap:5px; }
+.cfg-row label { font-size:.72rem; letter-spacing:.12em; color:var(--muted); text-transform:uppercase; }
+.cfg-row input { background:var(--bg); border:1px solid var(--border); color:var(--text); font-family:var(--mono); font-size:.9rem; padding:9px 12px; outline:none; width:100%; transition:border-color .2s; }
+.cfg-row input:focus { border-color:var(--healthy); }
+.cfg-note { font-size:.7rem; color:var(--muted); line-height:1.55; }
+#cfg-start { background:var(--healthy); color:var(--bg); border:none; padding:11px; font-family:var(--head); font-weight:800; font-size:.95rem; letter-spacing:.18em; text-transform:uppercase; cursor:pointer; width:100%; }
+#cfg-start:hover { opacity:.85; }
+
+/* HEADER */
+header { display:flex; align-items:center; justify-content:space-between; padding:12px 24px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.logo { font-family:var(--head); font-weight:800; font-size:1.3rem; letter-spacing:.22em; }
+.logo span { color:var(--healthy); }
+.hdr-meta { font-size:.68rem; letter-spacing:.08em; color:var(--muted); text-align:right; line-height:1.7; }
+.dot-live { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--healthy); margin-right:5px; animation:blink 2s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.15} }
+
+/* MAIN */
+main { flex:1; padding:18px 22px; display:flex; flex-direction:column; gap:14px; max-width:1060px; width:100%; margin:0 auto; }
+
+/* SYSTEM ALERT */
+#sys-alert {
+  display:none; padding:12px 20px; text-align:center;
+  background:rgba(255,34,68,.08); border:1px solid rgba(255,34,68,.4);
+  font-family:var(--head); font-weight:800; font-size:1.1rem;
+  letter-spacing:.14em; color:var(--critical);
+  animation:sysFlash .8s ease-in-out infinite;
+}
+@keyframes sysFlash { 0%,100%{opacity:1} 50%{opacity:.45} }
+
+/* NODE GRID */
+.node-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+@media(max-width:620px){ .node-grid { grid-template-columns:1fr; } }
+
+/* NODE CARD */
+.node-card {
+  background:var(--panel); border:2px solid var(--border);
+  position:relative; overflow:hidden;
+  transition:border-color .4s;
+}
+.node-card::before {
+  content:''; position:absolute; left:0; top:0; bottom:0; width:4px;
+  background:var(--nc, var(--healthy)); transition:background .4s;
+}
+@keyframes nodeFlash { 0%,100%{background:var(--panel)} 50%{background:rgba(255,34,68,.06)} }
+.node-card.crit { animation:nodeFlash .85s ease-in-out infinite; border-color:rgba(255,34,68,.45) !important; }
+
+.card-head {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:12px 16px 10px 20px; border-bottom:1px solid var(--border);
+}
+.node-id { font-family:var(--head); font-weight:800; font-size:.72rem; letter-spacing:.22em; color:var(--muted); text-transform:uppercase; }
+.node-src-badge { font-size:.6rem; letter-spacing:.09em; color:var(--dim); padding:2px 6px; border:1px solid var(--dim); }
+
+.card-body { padding:14px 20px 10px; }
+.st-sup { font-size:.6rem; letter-spacing:.16em; color:var(--muted); text-transform:uppercase; margin-bottom:5px; }
+.st-val {
+  font-family:var(--head); font-weight:800; line-height:1;
+  font-size:clamp(1.7rem,4.5vw,2.6rem); letter-spacing:.06em;
+  color:var(--nc, var(--healthy)); transition:color .4s;
+}
+.st-action { font-size:.7rem; color:var(--muted); margin-top:8px; letter-spacing:.04em; line-height:1.4; }
+
+/* D2 + gauge */
+.d2-section { padding:10px 20px 14px; }
+.d2-row { display:flex; align-items:baseline; gap:10px; margin-bottom:10px; }
+.d2-num {
+  font-family:var(--head); font-weight:800;
+  font-size:clamp(1.3rem,3.5vw,1.9rem); letter-spacing:.04em;
+  color:var(--nc, var(--healthy)); transition:color .4s;
+}
+.d2-unit { font-size:.62rem; color:var(--muted); letter-spacing:.1em; }
+
+.gauge-track { height:16px; background:#111820; border:1px solid var(--border); border-radius:2px; overflow:hidden; position:relative; }
+.gauge-fill { height:100%; width:0%; border-radius:2px 0 0 2px; background:var(--healthy); transition:width .55s cubic-bezier(.4,0,.2,1), background .4s; }
+.thr-bar { position:absolute; top:0; bottom:0; width:1px; background:var(--dim); }
+
+.zone-row { display:flex; margin-top:6px; gap:3px; }
+.zone { flex:1; text-align:center; font-size:.55rem; letter-spacing:.07em; text-transform:uppercase; padding:3px 0; border-top:1px solid; }
+.zh  { color:var(--healthy);  border-color:var(--healthy); }
+.zm  { color:var(--monitor);  border-color:var(--monitor); }
+.zmn { color:var(--maint);    border-color:var(--maint); }
+.zc  { color:var(--critical); border-color:var(--critical); }
+
+/* meta row */
+.card-meta { display:grid; grid-template-columns:1fr 1fr; border-top:1px solid var(--border); }
+.mc { padding:9px 12px 9px 20px; border-right:1px solid var(--border); }
+.mc:nth-child(2n) { border-right:none; }
+.mc .l { font-size:.58rem; letter-spacing:.12em; color:var(--muted); text-transform:uppercase; margin-bottom:3px; }
+.mc .v { font-size:.85rem; letter-spacing:.03em; }
+
+/* FOOTER */
+footer {
+  padding:9px 22px; border-top:1px solid var(--border);
+  display:flex; align-items:center; justify-content:space-between;
+  font-size:.65rem; color:var(--muted); letter-spacing:.08em; flex-wrap:wrap; gap:8px; flex-shrink:0;
+}
+#status-msg { display:flex; align-items:center; gap:8px; }
+#sdot { width:6px; height:6px; border-radius:50%; background:var(--muted); transition:background .3s; }
+#next-bar { height:2px; width:90px; background:var(--border); border-radius:1px; overflow:hidden; }
+#next-fill { height:100%; background:var(--healthy); width:100%; }
+.fbtns { display:flex; gap:8px; }
+.fbtn {
+  background:none; border:1px solid var(--border); color:var(--muted);
+  font-family:var(--mono); font-size:.65rem; letter-spacing:.09em;
+  padding:4px 9px; cursor:pointer; text-transform:uppercase; transition:border-color .2s,color .2s;
+}
+.fbtn:hover { border-color:var(--text); color:var(--text); }
+.fbtn.on { border-color:var(--healthy); color:var(--healthy); }
+</style>
+</head>
+<body>
+
+<!-- CONFIG OVERLAY -->
+<div id="cfg-overlay">
+  <h2>RTHM · CONFIGURE</h2>
+  <div class="cfg-box">
+    <div class="cfg-row">
+      <label>ThingSpeak Channel ID</label>
+      <input id="in-ch" type="text" placeholder="e.g. 2345678" autocomplete="off">
+    </div>
+    <div class="cfg-row">
+      <label>Read API Key (blank if public channel)</label>
+      <input id="in-key" type="text" placeholder="e.g. ABCDEF1234567890" autocomplete="off">
+    </div>
+    <p class="cfg-note">
+      <strong>thingspeak.com → My Channels → API Keys → Read API Key</strong><br>
+      Fields 1–4 = Node 1 (healthy section) &nbsp;|&nbsp; Fields 5–8 = Node 2 (monitored section)
+    </p>
+    <button id="cfg-start">START MONITORING</button>
+  </div>
+</div>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">RTHM<span>·</span>LIVE</div>
+  <div class="hdr-meta">
+    <div><span class="dot-live"></span>POLLING EVERY 15s</div>
+    <div id="ch-label" style="color:var(--dim)">—</div>
+  </div>
+</header>
+
+<!-- MAIN -->
+<main>
+
+  <div id="sys-alert">⚠&nbsp; CRITICAL FAULT DETECTED — HALT TRAIN OPERATIONS</div>
+
+  <div class="node-grid">
+
+    <!-- NODE 1 -->
+    <div class="node-card" id="c1">
+      <div class="card-head">
+        <div class="node-id">Node 1 · Healthy Section</div>
+        <div class="node-src-badge" id="src1">—</div>
+      </div>
+      <div class="card-body">
+        <div class="st-sup">Track Status</div>
+        <div class="st-val" id="st1">AWAITING</div>
+        <div class="st-action" id="act1">—</div>
+      </div>
+      <div class="d2-section">
+        <div class="d2-row">
+          <div class="d2-num" id="d2n1">—</div>
+          <div class="d2-unit">D² DISTANCE</div>
+        </div>
+        <div class="gauge-track" id="gt1">
+          <div class="gauge-fill" id="gf1"></div>
+        </div>
+        <div class="zone-row">
+          <div class="zone zh">Healthy<br>&lt;14</div>
+          <div class="zone zm">Monitor<br>14–18</div>
+          <div class="zone zmn">Maint<br>18–24</div>
+          <div class="zone zc">Critical<br>&gt;24</div>
+        </div>
+      </div>
+      <div class="card-meta">
+        <div class="mc"><div class="l">RSSI</div><div class="v" id="rssi1">—</div></div>
+        <div class="mc"><div class="l">Updated</div><div class="v" id="ts1">—</div></div>
+      </div>
+    </div>
+
+    <!-- NODE 2 -->
+    <div class="node-card" id="c2">
+      <div class="card-head">
+        <div class="node-id">Node 2 · Monitored Section</div>
+        <div class="node-src-badge" id="src2">—</div>
+      </div>
+      <div class="card-body">
+        <div class="st-sup">Track Status</div>
+        <div class="st-val" id="st2">AWAITING</div>
+        <div class="st-action" id="act2">—</div>
+      </div>
+      <div class="d2-section">
+        <div class="d2-row">
+          <div class="d2-num" id="d2n2">—</div>
+          <div class="d2-unit">D² DISTANCE</div>
+        </div>
+        <div class="gauge-track" id="gt2">
+          <div class="gauge-fill" id="gf2"></div>
+        </div>
+        <div class="zone-row">
+          <div class="zone zh">Healthy<br>&lt;14</div>
+          <div class="zone zm">Monitor<br>14–18</div>
+          <div class="zone zmn">Maint<br>18–24</div>
+          <div class="zone zc">Critical<br>&gt;24</div>
+        </div>
+      </div>
+      <div class="card-meta">
+        <div class="mc"><div class="l">RSSI</div><div class="v" id="rssi2">—</div></div>
+        <div class="mc"><div class="l">Updated</div><div class="v" id="ts2">—</div></div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- FOOTER -->
+<footer>
+  <div id="status-msg"><div id="sdot"></div><span id="stxt">Not started</span></div>
+  <div style="display:flex;align-items:center;gap:14px">
+    <div style="display:flex;align-items:center;gap:7px;font-size:.62rem">
+      NEXT <div id="next-bar"><div id="next-fill"></div></div>
+    </div>
+    <div class="fbtns">
+      <button class="fbtn" id="snd-btn">🔔 SOUND OFF</button>
+      <button class="fbtn" id="cfg-btn">⚙ CONFIG</button>
+    </div>
+  </div>
+</footer>
+
+<script>
+const THR1=14.07,THR2=18.48,THR3=24.32,GMAX=40,POLL=15000;
+const SM={
+  0:{l:'HEALTHY',    c:'var(--healthy)', a:'No action. Track is nominal.'},
+  1:{l:'MONITOR',    c:'var(--monitor)', a:'Inspect at next scheduled stop.'},
+  2:{l:'MAINTENANCE',c:'var(--maint)',   a:'Schedule maintenance within 72 hours.'},
+  3:{l:'CRITICAL',   c:'var(--critical)',a:'⚠ HALT — Do not run trains on this section.'},
+};
+const SRC=['AVG','NORM_AVG','CONS','A_ONLY','B_ONLY','BOTH_FAILED'];
+
+let chId='',rKey='',soundOn=false,actx=null,lastEid=null,pt=null,ct=null;
+
+// Build threshold bars
+[1,2].forEach(n=>{
+  const tr=document.getElementById('gt'+n);
+  [THR1,THR2,THR3].forEach(v=>{
+    const b=document.createElement('div'); b.className='thr-bar';
+    b.style.left=(v/GMAX*100)+'%'; tr.appendChild(b);
+  });
+});
+
+// Config
+function loadCfg(){
+  chId=localStorage.getItem('rthm_ch')||'';
+  rKey=localStorage.getItem('rthm_rk')||'';
+  if(chId)document.getElementById('in-ch').value=chId;
+  if(rKey)document.getElementById('in-key').value=rKey;
+}
+function saveCfg(){
+  chId=document.getElementById('in-ch').value.trim();
+  rKey=document.getElementById('in-key').value.trim();
+  localStorage.setItem('rthm_ch',chId); localStorage.setItem('rthm_rk',rKey);
+}
+document.getElementById('cfg-start').onclick=()=>{
+  const v=document.getElementById('in-ch').value.trim();
+  if(!v){document.getElementById('in-ch').style.borderColor='var(--critical)';return;}
+  saveCfg(); document.getElementById('cfg-overlay').style.display='none';
+  document.getElementById('ch-label').textContent='CH '+chId; start();
+};
+document.getElementById('cfg-btn').onclick=()=>{ stop(); document.getElementById('cfg-overlay').style.display='flex'; };
+
+// Sound — iOS safe
+function unlockAudio(){
+  if(!actx)actx=new(window.AudioContext||window.webkitAudioContext)();
+  actx.resume().then(()=>{
+    const b=actx.createBuffer(1,actx.sampleRate*.1,actx.sampleRate);
+    const s=actx.createBufferSource(); s.buffer=b; s.connect(actx.destination); s.start(0);
+    s.onended=()=>{const btn=document.getElementById('snd-btn'); btn.textContent='🔔 SOUND ON'; btn.classList.add('on'); soundOn=true;};
+  });
+}
+document.getElementById('snd-btn').onclick=()=>{
+  if(soundOn){soundOn=false;const b=document.getElementById('snd-btn');b.textContent='🔔 SOUND OFF';b.classList.remove('on');}
+  else unlockAudio();
+};
+function alarm(){
+  if(!soundOn||!actx)return;
+  actx.resume().then(()=>{
+    [0,.35,.70].forEach((t,i)=>{
+      const o=actx.createOscillator(),g=actx.createGain();
+      o.connect(g);g.connect(actx.destination);
+      o.frequency.value=[660,880,1100][i];o.type='square';
+      const c=actx.currentTime;
+      g.gain.setValueAtTime(0,c+t);
+      g.gain.linearRampToValueAtTime(.18,c+t+.02);
+      g.gain.linearRampToValueAtTime(0,c+t+.28);
+      o.start(c+t);o.stop(c+t+.3);
+    });
+  });
+}
+
+// Poll
+function start(){fetch_(); pt=setInterval(fetch_,POLL); countdown();}
+function stop(){clearInterval(pt);clearInterval(ct);pt=null;}
+function countdown(){
+  clearInterval(ct);
+  const nf=document.getElementById('next-fill');
+  nf.style.transition='none'; nf.style.width='100%';
+  nf.getBoundingClientRect();
+  nf.style.transition=`width ${POLL}ms linear`; nf.style.width='0%';
+}
+
+async function fetch_(){
+  setS('fetching','Polling ThingSpeak…');
+  const kp=rKey?'&api_key='+rKey:'';
+  try{
+    const r=await fetch(`https://api.thingspeak.com/channels/${chId}/feeds/last.json?${kp}`);
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const j=await r.json();
+    if(j.entry_id===lastEid){setS('idle','No new data — entry #'+j.entry_id);countdown();return;}
+    lastEid=j.entry_id;
+    const ts=j.created_at;
+    // Node 1: fields 1-4
+    const n1={state:cl(parseInt(j.field1??0)),d2:parseFloat(j.field2??0),src:cl(parseInt(j.field3??0),0,5),rssi:parseInt(j.field4??0)};
+    // Node 2: fields 5-8
+    const n2={state:cl(parseInt(j.field5??0)),d2:parseFloat(j.field6??0),src:cl(parseInt(j.field7??0),0,5),rssi:parseInt(j.field8??0)};
+    updNode(1,n1,ts); updNode(2,n2,ts);
+    // System alert + sound if any node critical
+    const anyCrit=n1.state===3||n2.state===3;
+    document.getElementById('sys-alert').style.display=anyCrit?'block':'none';
+    if(anyCrit)alarm();
+    setS('ok','Entry #'+j.entry_id+' — '+new Date(ts).toLocaleTimeString());
+    countdown();
+  }catch(e){setS('error','Error: '+e.message);countdown();}
+}
+
+function cl(v,lo=0,hi=3){return Math.max(lo,Math.min(hi,isNaN(v)?lo:v));}
+
+function updNode(n,data,ts){
+  const m=SM[data.state];
+  const card=document.getElementById('c'+n);
+  card.style.setProperty('--nc',m.c);
+  card.classList.toggle('crit',data.state===3);
+  // state text
+  const se=document.getElementById('st'+n); se.textContent=m.l; se.style.color=m.c;
+  document.getElementById('act'+n).textContent=m.a;
+  // D2
+  const d2e=document.getElementById('d2n'+n);
+  d2e.textContent=isNaN(data.d2)?'—':(data.d2>9999?'>9999':data.d2.toFixed(2));
+  d2e.style.color=m.c;
+  // gauge
+  const gf=document.getElementById('gf'+n);
+  gf.style.width=Math.min(100,(Math.min(data.d2,GMAX)/GMAX)*100)+'%';
+  gf.style.background=m.c;
+  // meta
+  document.getElementById('src'+n).textContent=SRC[data.src]??'?';
+  document.getElementById('rssi'+n).textContent=data.rssi+' dBm';
+  document.getElementById('ts'+n).textContent=ts?new Date(ts).toLocaleTimeString():'—';
+}
+
+function setS(t,msg){
+  document.getElementById('stxt').textContent=msg;
+  const c={fetching:'var(--monitor)',ok:'var(--healthy)',idle:'var(--muted)',error:'var(--critical)'};
+  document.getElementById('sdot').style.background=c[t]||'var(--muted)';
+}
+
+loadCfg();
+if(chId){document.getElementById('cfg-overlay').style.display='none';document.getElementById('ch-label').textContent='CH '+chId;start();}
+</script>
+</body>
+</html>
